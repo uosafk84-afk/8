@@ -276,8 +276,9 @@ input:focus,select:focus{box-shadow:0 0 0 2px var(--blue);background:rgba(255,25
 <div class="card glass"><span class="iconBadge purple">🧽</span><div class="cardText"><div class="label">Surf Sales</div><div class="value" id="surfSales">0</div><div class="small" id="surfProfit">Profit 0</div></div></div>
 <div class="card glass"><span class="iconBadge gray">📦</span><div class="cardText"><div class="label">Others Sales</div><div class="value" id="otherSales">0</div><div class="small" id="otherProfit">Profit 0</div></div></div>
 <div class="card glass"><span class="iconBadge orange">🌾</span><div class="cardText"><div class="label">Farm Sales</div><div class="value" id="farmSales">0</div><div class="small" id="farmProfit">Profit 0</div></div></div>
+<div class="card glass"><span class="iconBadge red">🏠</span><div class="cardText"><div class="label">Rent (daily, auto)</div><input id="rentInput" type="number" step="0.01" placeholder="0"></div></div>
 <div class="card glass"><span class="iconBadge gray">🧮</span><div class="cardText"><div class="label">Expenses</div><input id="expenses" type="number" step="0.01" placeholder="0"></div></div>
-</div></div>
+</div><p class="small">Rent is set once and deducted automatically every day from then on. Changing it only changes today onward — days already saved to History keep the rent that applied when they were closed.</p></div>
 </section>
 
 <section id="history" class="view"><div class="section glass"><h2>📚 Saved Days (unlimited)</h2><div id="historyList"></div></div><div id="detail"></div></section>
@@ -405,10 +406,10 @@ async function initFirebaseSync(){
 function cloudSave(doc,data){ if(fbReady && db && !applyingRemote){ db.collection('shopData').doc(doc).set(data).catch(()=>{}); } }
 function cloudSaveField(partial){ if(fbReady && db && !applyingRemote){ db.collection('shopData').doc('state').set(partial,{merge:true}).catch(()=>{}); } }
 function eachRow(o,fn){Object.keys(o).forEach(k=>fn(o[k],Number(k)))}
-let settings={soap:0,surf:0,wasleen:57,sh10:5,sh6:8};
+let settings={soap:0,surf:0,wasleen:57,sh10:5,sh6:8,rent:0};
 const DEFAULT_ROW_COUNTS={soap:40,wasleen:40,surf:40,other:20,farm:20,shampooA:20,shampooB:20};
 let state=blankState();
-function blankState(){return {openDate:today(),rows:emptyRows(),expenses:0,history:[],rowCounts:{...DEFAULT_ROW_COUNTS}}}
+function blankState(){return {openDate:today(),rows:emptyRows(),expenses:0,rent:0,history:[],rowCounts:{...DEFAULT_ROW_COUNTS}}}
 function emptyRows(){return {soap:{},wasleen:{},shampoo:{},surf:{},other:{},farm:{}}}
 function ensureRowCounts(){
   if(!state.rowCounts) state.rowCounts={...DEFAULT_ROW_COUNTS};
@@ -475,14 +476,16 @@ async function removeRows(type,n){
   }
   render();
 }
-function hasData(){return Object.values(state.rows).some(rowsObj=>Object.values(rowsObj).some(x=>x))||Number(state.expenses)>0}
+function hasData(){return Object.values(state.rows).some(rowsObj=>Object.values(rowsObj).some(x=>x))||Number(state.expenses)>0||Number(state.rent)>0}
 function advanceDay(d){
   let rc={...DEFAULT_ROW_COUNTS};
   const mk=n=>{let o={};for(let i=0;i<n;i++)o[i]=null;return o};
   state.openDate=d;
   state.rows={soap:mk(rc.soap),wasleen:mk(rc.wasleen),shampoo:mk(rc.shampooA+rc.shampooB),surf:mk(rc.surf),other:mk(rc.other),farm:mk(rc.farm)};
   state.rowCounts=rc;
-  state.expenses=0;save();
+  state.expenses=0;
+  state.rent=Number(settings.rent||0);
+  save();
 }
 function checkMidnightRollover(){
   const t=today();
@@ -490,7 +493,7 @@ function checkMidnightRollover(){
   if(hasData()){
     calc();
     const sums=aggregate();
-    addHistoryEntry({date:state.openDate,summary:sums,rows:state.rows,expenses:Number(state.expenses||0),closedAt:new Date().toISOString(),autoClosed:true});
+    addHistoryEntry({date:state.openDate,summary:sums,rows:state.rows,expenses:Number(state.expenses||0),rent:Number(state.rent||0),closedAt:new Date().toISOString(),autoClosed:true});
   }
   advanceDay(t);
   return true;
@@ -551,6 +554,16 @@ buildSoap();buildWasleen();buildShampoo();buildSurf();buildOther();buildFarm();c
 const exp=document.getElementById('expenses');
 exp.value=state.expenses||'';
 exp.oninput=e=>{state.expenses=(e.target.value===''?0:Number(e.target.value));saveLocal();cloudSaveField({expenses:state.expenses});calc();};
+const rentEl=document.getElementById('rentInput');
+rentEl.value=state.rent||'';
+rentEl.oninput=e=>{
+  const v=(e.target.value===''?0:Number(e.target.value));
+  state.rent=v;
+  settings.rent=v;
+  saveLocal();cloudSaveField({rent:state.rent});
+  storageSet(SET,JSON.stringify(settings));cloudSave('settings',settings);
+  calc();
+};
 renderHistory();loadSettings();
 }
 async function changeWorkDate(v){
@@ -624,13 +637,13 @@ eachRow(state.rows.surf,(r,i)=>{if(r?.sp!=null){sums.surf[0]+=r.sp;sums.surf[1]+
 eachRow(state.rows.other,(r,i)=>{if(r?.sp!=null){sums.other[0]+=r.sp;sums.other[1]+=cellProfit('other',i);count++}});
 eachRow(state.rows.farm,(r,i)=>{if(r?.sp!=null){sums.farm[0]+=r.sp;sums.farm[1]+=cellProfit('farm',i);count++}});
 let sales=Object.values(sums).reduce((a,x)=>a+x[0],0),profit=Object.values(sums).reduce((a,x)=>a+x[1],0);
-document.getElementById('totalSales').textContent=money(sales)+' AFN';document.getElementById('totalProfit').textContent=money(profit-Number(state.expenses||0))+' AFN';document.getElementById('entryCount').textContent=count;
+document.getElementById('totalSales').textContent=money(sales)+' AFN';document.getElementById('totalProfit').textContent=money(profit-Number(state.expenses||0)-Number(state.rent||0))+' AFN';document.getElementById('entryCount').textContent=count;
 [['soap',sums.soap],['wasleen',sums.wasleen],['shampoo',sums.shampoo],['surf',sums.surf],['other',sums.other],['farm',sums.farm]].forEach(([k,x])=>{document.getElementById(k+'Sales').textContent=money(x[0]);document.getElementById(k+'Profit').textContent='Profit '+money(x[1])});
 }
 async function closeDay(){
 if(!hasData()){await appAlert('There are no sales to close.');return}
-calc();let sums=aggregate();let ok=await appConfirm(`${state.openDate}\nTotal Sales: ${money(sums.totalSales)} AFN\nTotal Profit after expenses: ${money(sums.netProfit)} AFN\nSales entries: ${sums.count}\n\nSAVE & CLOSE DAY?`);if(!ok)return;
-addHistoryEntry({date:state.openDate,summary:sums,rows:state.rows,expenses:Number(state.expenses||0),closedAt:new Date().toISOString()});
+calc();let sums=aggregate();let ok=await appConfirm(`${state.openDate}\nTotal Sales: ${money(sums.totalSales)} AFN\nTotal Profit after rent & expenses: ${money(sums.netProfit)} AFN\nSales entries: ${sums.count}\n\nSAVE & CLOSE DAY?`);if(!ok)return;
+addHistoryEntry({date:state.openDate,summary:sums,rows:state.rows,expenses:Number(state.expenses||0),rent:Number(state.rent||0),closedAt:new Date().toISOString()});
 advanceDay(today());
 render();await appAlert('Day saved successfully. A fresh daily sheet is ready. Your saved days are never deleted automatically — History keeps every day, with no limit.');
 }
@@ -648,7 +661,7 @@ eachRow(state.rows.shampoo,(r,i)=>{if(r?.sp!=null){let k=i<state.rowCounts.shamp
 eachRow(state.rows.surf,(r,i)=>{if(r?.sp!=null){s.surf[0]+=1;s.surf[1]+=r.sp;s.surf[2]+=cellProfit('surf',i);count++}});
 eachRow(state.rows.other,(r,i)=>{if(r?.sp!=null){s.other[0]+=1;s.other[1]+=r.sp;s.other[2]+=cellProfit('other',i);count++}});
 eachRow(state.rows.farm,(r,i)=>{if(r?.sp!=null){s.farm[0]+=1;s.farm[1]+=r.sp;s.farm[2]+=cellProfit('farm',i);count++}});
-let totalSales=Object.values(s).reduce((a,x)=>a+x[1],0),gross=Object.values(s).reduce((a,x)=>a+x[2],0),netProfit=gross-Number(state.expenses||0);return {products:s,totalSales,grossProfit:gross,expenses:Number(state.expenses||0),netProfit,count}}
+let totalSales=Object.values(s).reduce((a,x)=>a+x[1],0),gross=Object.values(s).reduce((a,x)=>a+x[2],0),netProfit=gross-Number(state.expenses||0)-Number(state.rent||0);return {products:s,totalSales,grossProfit:gross,expenses:Number(state.expenses||0),rent:Number(state.rent||0),netProfit,count}}
 function renderHistory(){let h='';[...state.history].reverse().forEach((d)=>{let idx=state.history.findIndex(x=>x.date===d.date);h+=`<div class="section glass"><b>${d.date}</b>${d.imported?' <span class="small">(imported)</span>':''}<br>Sales: ${money(d.summary.totalSales)} AFN &nbsp; Profit: ${money(d.summary.netProfit)} AFN &nbsp; Entries: ${d.summary.count} <button type="button" class="secondaryBtn" onclick="detail(${idx})">View details</button> <button type="button" class="dangerBtn" onclick="deleteHistoryDay(${idx})">Delete</button></div>`});document.getElementById('historyList').innerHTML=h||'<p>No saved days yet.</p>'}
 async function deleteHistoryDay(idx){
   let d=state.history[idx];
@@ -667,10 +680,10 @@ let rows=[
 let body=rows.map(([label,v])=>`<tr><td>${label}</td><td>${money(v[0])}</td><td>${money(v[1])}</td><td>${money(v[2])}</td></tr>`).join('');
 document.getElementById('detail').innerHTML=`<div class="section glass"><h2>${d.date} — Combined Daily Record</h2><table><tr><th>Product</th><th>Quantity</th><th>Total Sales</th><th>Total Profit</th></tr>
 ${body}
-<tr><th>Daily Total</th><th></th><th>${money(d.summary.totalSales)}</th><th>${money(d.summary.netProfit)}</th></tr></table><p>Expenses: ${money(d.expenses)} AFN</p></div>`;
+<tr><th>Daily Total</th><th></th><th>${money(d.summary.totalSales)}</th><th>${money(d.summary.netProfit)}</th></tr></table><p>Rent: ${money(d.rent??d.summary.rent??0)} AFN &nbsp; Expenses: ${money(d.expenses)} AFN</p></div>`;
 show('history');window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});
 }
-function saveSettings(){settings={soap:val(document.getElementById('setSoap').value),surf:val(document.getElementById('setSurf').value),wasleen:val(document.getElementById('setWasleen').value),sh10:val(document.getElementById('setSh10').value)||5,sh6:val(document.getElementById('setSh6').value)||8};storageSet(SET,JSON.stringify(settings));cloudSave('settings',settings);appAlert('Settings saved. Existing entered rows keep their own A Price.');render()}
+function saveSettings(){settings={soap:val(document.getElementById('setSoap').value),surf:val(document.getElementById('setSurf').value),wasleen:val(document.getElementById('setWasleen').value),sh10:val(document.getElementById('setSh10').value)||5,sh6:val(document.getElementById('setSh6').value)||8,rent:Number(settings.rent||0)};storageSet(SET,JSON.stringify(settings));cloudSave('settings',settings);appAlert('Settings saved. Existing entered rows keep their own A Price.');render()}
 function loadSettings(){document.getElementById('setSoap').value=settings.soap??'';document.getElementById('setSurf').value=settings.surf??'';document.getElementById('setWasleen').value=settings.wasleen??57;document.getElementById('setSh10').value=settings.sh10??5;document.getElementById('setSh6').value=settings.sh6??8}
 function show(id){document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('navActive',b.dataset.view===id));if(id==='history')renderHistory();if(id==='analytics')renderAnalytics()}
 function showProd(tab){

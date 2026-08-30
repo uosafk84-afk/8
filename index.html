@@ -958,6 +958,10 @@ function loadSheetPreview(){
   <div><label>Shampoo Profit</label><select id="mapShP">${colOpts}</select></div>
   <div><label>Surf Sales</label><select id="mapSurfS">${colOpts}</select></div>
   <div><label>Surf Profit</label><select id="mapSurfP">${colOpts}</select></div>
+  <div><label>Others Sales</label><select id="mapOtherS">${colOpts}</select></div>
+  <div><label>Others Profit</label><select id="mapOtherP">${colOpts}</select></div>
+  <div><label>Farm Sales</label><select id="mapFarmS">${colOpts}</select></div>
+  <div><label>Farm Profit</label><select id="mapFarmP">${colOpts}</select></div>
   </div>
   <div class="previewTbl"><table><tr>${importHeaders.map(h=>`<th>${h}</th>`).join('')}</tr>
   ${importSheetRows.slice(0,5).map(r=>`<tr>${importHeaders.map((_,i)=>`<td>${r[i]??''}</td>`).join('')}</tr>`).join('')}
@@ -981,13 +985,14 @@ function num(v){if(v==null||v==='')return 0;let n=Number(String(v).replace(/,/g,
 function confirmImport(){
   let m={date:document.getElementById('mapDate').value,sales:document.getElementById('mapSales').value,profit:document.getElementById('mapProfit').value,expenses:document.getElementById('mapExpenses').value,
   soapS:document.getElementById('mapSoapS').value,soapP:document.getElementById('mapSoapP').value,wasS:document.getElementById('mapWasS').value,wasP:document.getElementById('mapWasP').value,
-  shS:document.getElementById('mapShS').value,shP:document.getElementById('mapShP').value,surfS:document.getElementById('mapSurfS').value,surfP:document.getElementById('mapSurfP').value};
+  shS:document.getElementById('mapShS').value,shP:document.getElementById('mapShP').value,surfS:document.getElementById('mapSurfS').value,surfP:document.getElementById('mapSurfP').value,
+  otherS:document.getElementById('mapOtherS').value,otherP:document.getElementById('mapOtherP').value,farmS:document.getElementById('mapFarmS').value,farmP:document.getElementById('mapFarmP').value};
   if(m.date===''){appAlert('Please choose which column holds the Date — every imported day needs a date.');return}
   let imported=0,skipped=0;
   importSheetRows.forEach(r=>{
     let date=parseDateCell(r[m.date]);
     if(!date){skipped++;return}
-    let hasProduct=m.soapS!=='' || m.wasS!=='' || m.shS!=='' || m.surfS!=='';
+    let hasProduct=m.soapS!=='' || m.wasS!=='' || m.shS!=='' || m.surfS!=='' || m.otherS!=='' || m.farmS!=='';
     let products={};
     let sales=0,profit=0;
     if(hasProduct){
@@ -995,6 +1000,8 @@ function confirmImport(){
       if(m.wasS!=='')products.wasleen=[0,num(r[m.wasS]),num(r[m.wasP])];
       if(m.shS!=='')products.shampoo10=[0,num(r[m.shS]),num(r[m.shP])];
       if(m.surfS!=='')products.surf=[0,num(r[m.surfS]),num(r[m.surfP])];
+      if(m.otherS!=='')products.other=[0,num(r[m.otherS]),num(r[m.otherP])];
+      if(m.farmS!=='')products.farm=[0,num(r[m.farmS]),num(r[m.farmP])];
       sales=Object.values(products).reduce((a,x)=>a+x[1],0);
       profit=Object.values(products).reduce((a,x)=>a+x[2],0);
     } else if(m.sales!=='' || m.profit!==''){

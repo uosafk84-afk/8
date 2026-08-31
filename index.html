@@ -127,6 +127,11 @@ table{border-collapse:collapse;border-spacing:0;width:auto}
 .syncBadge{display:inline-block;margin-top:4px;font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:8px}
 .syncBadge.online{background:rgba(52,199,89,.14);color:#1a7a35;border:1px solid rgba(52,199,89,.3)}
 .syncBadge.offline{background:rgba(255,149,0,.14);color:#9a5b00;border:1px solid rgba(255,149,0,.3)}
+.syncBadge.unsaved{background:rgba(255,59,48,.16);color:#c62b20;border:1px solid rgba(255,59,48,.35);font-weight:700;animation:pulseUnsaved 1.6s ease-in-out infinite}
+@keyframes pulseUnsaved{0%,100%{opacity:1}50%{opacity:.55}}
+.saveBtn{border:1px solid rgba(52,199,89,.55);background:rgba(52,199,89,.85);color:#fff;padding:11px 16px;border-radius:16px;font-weight:700;
+  font-size:13.5px;cursor:pointer;transition:transform .12s var(--spring),background-color .15s;box-shadow:0 6px 16px rgba(52,199,89,.3),inset 0 1px 0 rgba(255,255,255,.3);white-space:nowrap}
+.saveBtn:active{transform:scale(.95)}
 .saveToast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%) translateY(20px);z-index:60;
   background:rgba(30,32,38,.88);color:#fff;font-size:12.5px;font-weight:600;padding:8px 16px;border-radius:999px;
   box-shadow:0 8px 20px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .25s var(--ease),transform .25s var(--ease)}
@@ -221,7 +226,7 @@ input:focus,select:focus{box-shadow:0 0 0 2px var(--blue);background:rgba(255,25
 </div>
 <div id="saveToast" class="saveToast">✓ Saved</div>
 <div class="app">
-<header class="glass"><div><div class="title"><img src="icon-192.png" alt=""> STAR SHOP</div><div class="date">Working day: <input type="date" class="date" id="workDateInput" onchange="changeWorkDate(this.value)"></div><div id="syncBadge" class="syncBadge offline">📴 Local only</div></div><button type="button" class="primary" onclick="closeDay()">SAVE & CLOSE DAY</button></header>
+<header class="glass"><div><div class="title"><img src="icon-192.png" alt=""> STAR SHOP</div><div class="date">Working day: <input type="date" class="date" id="workDateInput" onchange="changeWorkDate(this.value)"></div><div id="syncBadge" class="syncBadge offline">📴 Local only</div> <span id="unsavedBadge" class="syncBadge unsaved" style="display:none">● Unsaved changes</span></div><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button type="button" class="saveBtn" onclick="manualSave()">💾 Save</button><button type="button" class="primary" onclick="closeDay()">SAVE & CLOSE DAY</button></div></header>
 <nav>
 <button type="button" class="navActive" data-view="daily" onclick="show('daily')"><span class="iconBadge blue">🏠</span>Daily Sale</button>
 <button type="button" data-view="history" onclick="show('history')"><span class="iconBadge orange">🕘</span>History</button>
@@ -296,6 +301,9 @@ input:focus,select:focus{box-shadow:0 0 0 2px var(--blue);background:rgba(255,25
 <div class="grid2"><div>Soap default A Price<input id="setSoap" type="number" step=".01"></div><div>Surf default A Price<input id="setSurf" type="number" step=".01"></div><div>Wasleen A Price / KG<input id="setWasleen" type="number" step=".01"></div><div>Shampoo first 20 A Price / L<input id="setSh10" type="number" step=".01" value="5"></div><div>Shampoo second 20 A Price / L<input id="setSh6" type="number" step=".01" value="8"></div></div><br><button type="button" class="primary" onclick="saveSettings()">Save Settings</button>
 <hr><p><b>Excel import:</b> click "Import Excel" above, pick your sheet, then match your columns (Date, Sales, Profit, per-product if you have them). You choose the mapping, so it works with your existing workbook exactly as it is. Imported days are added to History and included in Analytics.</p>
 <div id="importArea"></div>
+<hr><h2>🗑️ Reset All Data</h2>
+<p>Wipes today's sheet and your entire saved History, on this device and in the cloud, and starts completely fresh. Only do this if you already have a backup of anything you want to keep — this cannot be undone.</p>
+<button type="button" class="dangerBtn" style="padding:11px 18px;font-size:13.5px" onclick="resetAllData()">Wipe All Data & Start Fresh</button>
 </div></section>
 </div>
 <script>
@@ -377,13 +385,18 @@ async function initFirebaseSync(){
       Object.keys(src).forEach(k=>{out[k]=deepMergeState(target[k],src[k])});
       return out;
     }
+    let resolveFirstState;
+    const firstStateSync=new Promise(res=>{resolveFirstState=res});
     db.collection('shopData').doc('settings').onSnapshot(snap=>{
       if(snap.exists){
         let incoming=snap.data();
         if(JSON.stringify(incoming)!==JSON.stringify(settings)){
-          applyingRemote=true;settings=deepMergeState(settings,incoming);
-          if(isTyping()) pendingRerender=true; else render();
-          applyingRemote=false;
+          if(unsaved){ pendingRemoteSync=true; }
+          else{
+            applyingRemote=true;settings=deepMergeState(settings,incoming);
+            if(isTyping()) pendingRerender=true; else render();
+            applyingRemote=false;
+          }
         }
       }
       setSyncBadge(snap.metadata.fromCache?'📴 Offline (will sync)':'☁️ Synced',snap.metadata.fromCache?'offline':'online');
@@ -392,19 +405,23 @@ async function initFirebaseSync(){
       if(snap.exists){
         let incoming=snap.data();
         if(JSON.stringify(incoming)!==JSON.stringify(state)){
-          applyingRemote=true;state=deepMergeState(state,incoming);ensureRowCounts();
-          if(isTyping()) pendingRerender=true; else render();
-          applyingRemote=false;
+          if(unsaved){ pendingRemoteSync=true; }
+          else{
+            applyingRemote=true;state=deepMergeState(state,incoming);ensureRowCounts();
+            if(isTyping()) pendingRerender=true; else render();
+            applyingRemote=false;
+          }
         }
       }
       setSyncBadge(snap.metadata.fromCache?'📴 Offline (will sync)':'☁️ Synced',snap.metadata.fromCache?'offline':'online');
-    },()=>{setSyncBadge('⚠️ Sync error','offline')});
+      if(!snap.metadata.fromCache && resolveFirstState){resolveFirstState();resolveFirstState=null}
+    },()=>{setSyncBadge('⚠️ Sync error','offline');if(resolveFirstState){resolveFirstState();resolveFirstState=null}});
     window.addEventListener('online',()=>setSyncBadge('☁️ Synced','online'));
     window.addEventListener('offline',()=>setSyncBadge('📴 Offline (will sync)','offline'));
+    await Promise.race([firstStateSync,new Promise(res=>setTimeout(res,6000))]);
   }catch(e){setSyncBadge('📴 Local only','offline')}
 }
 function cloudSave(doc,data){ if(fbReady && db && !applyingRemote){ db.collection('shopData').doc(doc).set(data).catch(()=>{}); } }
-function cloudSaveField(partial){ if(fbReady && db && !applyingRemote){ db.collection('shopData').doc('state').set(partial,{merge:true}).catch(()=>{}); } }
 function eachRow(o,fn){Object.keys(o).forEach(k=>fn(o[k],Number(k)))}
 let settings={soap:0,surf:0,wasleen:57,sh10:5,sh6:8,rent:0};
 const DEFAULT_ROW_COUNTS={soap:40,wasleen:40,surf:40,other:20,farm:20,shampooA:20,shampooB:20};
@@ -434,17 +451,17 @@ function addRows(type,n){
     for(let i=oldA;i<oldTotal;i++) newRows[i+n]=state.rows.shampoo[i]??null;
     state.rows.shampoo=newRows;
     state.rowCounts.shampooA+=n;
-    saveLocal();cloudSaveField({rowCounts:state.rowCounts,rows:{shampoo:state.rows.shampoo}});
+    markDirty();
   } else if(type==='shampooB'){
     const total=state.rowCounts.shampooA+state.rowCounts.shampooB;
     for(let k=0;k<n;k++) state.rows.shampoo[total+k]=null;
     state.rowCounts.shampooB+=n;
-    saveLocal();cloudSaveField({rowCounts:state.rowCounts,rows:{shampoo:state.rows.shampoo}});
+    markDirty();
   } else {
     const cur=state.rowCounts[type];
     for(let k=0;k<n;k++) state.rows[type][cur+k]=null;
     state.rowCounts[type]+=n;
-    saveLocal();cloudSaveField({rowCounts:state.rowCounts,rows:{[type]:state.rows[type]}});
+    markDirty();
   }
   render();
 }
@@ -464,7 +481,7 @@ async function removeRows(type,n){
     for(let i=oldA;i<oldTotal;i++){ if(type==='shampooB' && i>=oldTotal-n) continue; newRows[idx++]=state.rows.shampoo[i]??null; }
     state.rows.shampoo=newRows;
     state.rowCounts.shampooA=newA;state.rowCounts.shampooB=newB;
-    saveLocal();cloudSaveField({rowCounts:state.rowCounts,rows:{shampoo:state.rows.shampoo}});
+    markDirty();
   } else {
     const cur=state.rowCounts[type];
     if(cur<=n){await appAlert('Can\'t remove that many rows — at least 10 must remain.');return}
@@ -472,7 +489,7 @@ async function removeRows(type,n){
     if(removedHasData){const ok=await appConfirm('Some of those rows have sales entered. Remove them anyway? This cannot be undone.');if(!ok)return}
     for(let k=0;k<n;k++) delete state.rows[type][cur-n+k];
     state.rowCounts[type]-=n;
-    saveLocal();cloudSaveField({rowCounts:state.rowCounts,rows:{[type]:state.rows[type]}});
+    markDirty();
   }
   render();
 }
@@ -485,21 +502,19 @@ function advanceDay(d){
   state.rowCounts=rc;
   state.expenses=0;
   state.rent=Number(settings.rent||0);
-  save();
 }
-function checkMidnightRollover(){
-  const t=today();
-  if(state.openDate===t) return false;
-  if(hasData()){
-    calc();
-    const sums=aggregate();
-    addHistoryEntry({date:state.openDate,summary:sums,rows:state.rows,expenses:Number(state.expenses||0),rent:Number(state.rent||0),closedAt:new Date().toISOString(),autoClosed:true});
-  }
-  advanceDay(t);
-  return true;
+let unsaved=false,pendingRemoteSync=false;
+function markDirty(){unsaved=true;const b=document.getElementById('unsavedBadge');if(b)b.style.display='inline-block'}
+function clearDirty(){unsaved=false;const b=document.getElementById('unsavedBadge');if(b)b.style.display='none'}
+async function manualSave(){
+  storageSet(KEY,JSON.stringify(state));
+  storageSet(SET,JSON.stringify(settings));
+  cloudSave('state',state);
+  cloudSave('settings',settings);
+  clearDirty();
+  flashSaved();
+  if(pendingRemoteSync){ pendingRemoteSync=false; }
 }
-function save(){storageSet(KEY,JSON.stringify(state));cloudSave('state',state);flashSaved()}
-function saveLocal(){storageSet(KEY,JSON.stringify(state));flashSaved()}
 let saveToastTimer=null;
 function flashSaved(){
   const el=document.getElementById('saveToast');
@@ -507,9 +522,6 @@ function flashSaved(){
   el.classList.add('show');
   clearTimeout(saveToastTimer);
   saveToastTimer=setTimeout(()=>el.classList.remove('show'),1100);
-}
-function forceFlush(){
-  try{ storageSet(KEY,JSON.stringify(state)); cloudSave('state',state); }catch(e){}
 }
 async function init(){
   try{
@@ -519,31 +531,10 @@ async function init(){
   }catch(e){}
   ensureRowCounts();
   render();
-  const rolled=checkMidnightRollover();
-  if(rolled) render();
-  initFirebaseSync();
-  if(rolled) appAlert('A new day has started. Your previous day was automatically saved to History, and the row counts reset to their default size.');
-  scheduleMidnightCheck();
-}
-function scheduleMidnightCheck(){
-  setInterval(()=>{
-    const rolled=checkMidnightRollover();
-    if(rolled){
-      render();
-      appAlert('It\'s a new day. Your previous day was automatically saved to History, and the row counts reset to their default size.');
-    }
-  },60000);
-  document.addEventListener('visibilitychange',()=>{
-    if(document.visibilityState==='visible'){
-      const rolled=checkMidnightRollover();
-      if(rolled) render();
-    } else {
-      forceFlush();
-    }
-  });
-  window.addEventListener('blur',forceFlush);
-  window.addEventListener('pagehide',forceFlush);
-  window.addEventListener('beforeunload',forceFlush);
+  await initFirebaseSync();
+  ensureRowCounts();
+  render();
+  window.addEventListener('beforeunload',e=>{ if(unsaved){ e.preventDefault(); e.returnValue=''; } });
 }
 function money(n){return (Number(n)||0).toFixed(2)}
 function val(v){return v===''||v==null?'':Number(v)}
@@ -553,15 +544,14 @@ document.getElementById('workDateInput').value=state.openDate; document.getEleme
 buildSoap();buildWasleen();buildShampoo();buildSurf();buildOther();buildFarm();calc();
 const exp=document.getElementById('expenses');
 exp.value=state.expenses||'';
-exp.oninput=e=>{state.expenses=(e.target.value===''?0:Number(e.target.value));saveLocal();cloudSaveField({expenses:state.expenses});calc();};
+exp.oninput=e=>{state.expenses=(e.target.value===''?0:Number(e.target.value));markDirty();calc();};
 const rentEl=document.getElementById('rentInput');
 rentEl.value=state.rent||'';
 rentEl.oninput=e=>{
   const v=(e.target.value===''?0:Number(e.target.value));
   state.rent=v;
   settings.rent=v;
-  saveLocal();cloudSaveField({rent:state.rent});
-  storageSet(SET,JSON.stringify(settings));cloudSave('settings',settings);
+  markDirty();
   calc();
 };
 renderHistory();loadSettings();
@@ -570,11 +560,11 @@ async function changeWorkDate(v){
   if(!v || v===state.openDate){ document.getElementById('workDateInput').value=state.openDate; return; }
   const existing=state.history.find(d=>d.date===v);
   let msg=`Change the working day to ${v}?`;
-  if(existing) msg+=`\n\nNote: History already has a saved day for ${v}. If you SAVE & CLOSE DAY under this date, it will overwrite that saved entry.`;
+  if(existing) msg+=`\n\nNote: History already has a saved day for ${v}. If you SAVE & CLOSE DAY under this date, your older data for that date will be kept safely as a backup entry, not deleted.`;
   const ok=await appConfirm(msg);
   if(!ok){ document.getElementById('workDateInput').value=state.openDate; return; }
   state.openDate=v;
-  saveLocal();cloudSaveField({openDate:v});
+  markDirty();
   render();
 }
 function addRowBtnRow(colspan,type,label){
@@ -605,8 +595,7 @@ function setRow(type,i,field,v){
   if(!state.rows[type][i]) state.rows[type][i]={};
   let val=(v==='' ? null : Number(v));
   state.rows[type][i][field]=val;
-  saveLocal();
-  cloudSaveField({rows:{[type]:{[i]:{[field]:val}}}});
+  markDirty();
   updateRowCalc(type,i);calc();
 }
 function updateRowCalc(type,i){
@@ -642,16 +631,36 @@ document.getElementById('totalSales').textContent=money(sales)+' AFN';document.g
 }
 async function closeDay(){
 if(!hasData()){await appAlert('There are no sales to close.');return}
-calc();let sums=aggregate();let ok=await appConfirm(`${state.openDate}\nTotal Sales: ${money(sums.totalSales)} AFN\nTotal Profit after rent & expenses: ${money(sums.netProfit)} AFN\nSales entries: ${sums.count}\n\nSAVE & CLOSE DAY?`);if(!ok)return;
+calc();let sums=aggregate();
+const existing=state.history.find(d=>d.date===state.openDate);
+let msg=`${state.openDate}\nTotal Sales: ${money(sums.totalSales)} AFN\nTotal Profit after rent & expenses: ${money(sums.netProfit)} AFN\nSales entries: ${sums.count}\n\nSAVE & CLOSE DAY?`;
+if(existing && (Number(existing.summary?.count)>0 || Number(existing.summary?.totalSales)>0)) msg+=`\n\n⚠️ History already has a saved day for ${state.openDate}. Your older data for that date will be kept as a backup entry, not deleted.`;
+let ok=await appConfirm(msg);if(!ok)return;
 addHistoryEntry({date:state.openDate,summary:sums,rows:state.rows,expenses:Number(state.expenses||0),rent:Number(state.rent||0),closedAt:new Date().toISOString()});
 advanceDay(today());
-render();await appAlert('Day saved successfully. A fresh daily sheet is ready. Your saved days are never deleted automatically — History keeps every day, with no limit.');
+render();
+await manualSave();
+await appAlert('Day saved successfully. A fresh daily sheet is ready. Your saved days are never deleted automatically — History keeps every day, with no limit.');
 }
 function addHistoryEntry(entry){
   let i=state.history.findIndex(d=>d.date===entry.date);
-  if(i>=0) state.history[i]=entry; else state.history.push(entry);
+  if(i>=0){
+    const old=state.history[i];
+    const oldHadData=old.summary && (Number(old.summary.count)>0 || Number(old.summary.totalSales)>0);
+    const sameData=JSON.stringify(old.summary)===JSON.stringify(entry.summary) && Number(old.expenses||0)===Number(entry.expenses||0) && Number(old.rent||0)===Number(entry.rent||0);
+    if(oldHadData && !sameData){
+      let backupDate=old.date+' (prev)',n=1;
+      while(state.history.some(d=>d.date===backupDate)){ n++; backupDate=old.date+' (prev '+n+')'; }
+      old.date=backupDate; old.conflictBackup=true;
+      state.history.push(entry);
+    } else {
+      state.history[i]=entry;
+    }
+  } else {
+    state.history.push(entry);
+  }
   state.history.sort((a,b)=>a.date<b.date?-1:1);
-  save();
+  markDirty();
 }
 function aggregate(){let s={soap:[0,0,0],wasleen:[0,0,0],shampoo10:[0,0,0],shampoo6:[0,0,0],surf:[0,0,0],other:[0,0,0],farm:[0,0,0]},count=0;
 const cellProfit=(type,i)=>{let el=document.getElementById(type+'_profit_'+i);return el?(parseFloat(el.textContent)||0):0};
@@ -669,7 +678,7 @@ async function deleteHistoryDay(idx){
   let ok=await appConfirm(`Delete this saved day?\n\n${d.date}\nSales: ${money(d.summary.totalSales)} AFN   Profit: ${money(d.summary.netProfit)} AFN\n\nThis cannot be undone.`);
   if(!ok) return;
   state.history.splice(idx,1);
-  saveLocal();cloudSaveField({history:state.history});
+  await manualSave();
   renderHistory();
   if(document.getElementById('analytics').classList.contains('active')) renderAnalytics();
 }
@@ -1013,11 +1022,24 @@ function confirmImport(){
     addHistoryEntry({date,summary:{products,totalSales:sales,grossProfit:profit,expenses,netProfit,count:1},rows:null,expenses,imported:true,closedAt:new Date().toISOString()});
     imported++;
   });
+  manualSave();
   appAlert(`Imported ${imported} day(s) into History.${skipped?` Skipped ${skipped} row(s) without a usable date/value.`:''}\nYou can review them under History or Analytics. Your current open working day was not affected — keep entering today's sales as normal.`);
   document.getElementById('importArea').innerHTML='';
   renderHistory();
 }
 
+async function resetAllData(){
+  let ok=await appConfirm('This will permanently erase today\'s sheet AND every saved day in History, on this device and in the cloud.\n\nMake sure you already have a backup (Export Excel) of anything you want to keep.\n\nThis cannot be undone. Continue?');
+  if(!ok) return;
+  let ok2=await appConfirm('Are you absolutely sure? This is your last chance to cancel.\n\nType nothing needed — just confirm to permanently wipe all data.');
+  if(!ok2) return;
+  state={openDate:today(),rows:emptyRows(),expenses:0,rent:Number(settings.rent||0),history:[],rowCounts:{...DEFAULT_ROW_COUNTS}};
+  storageSet(KEY,JSON.stringify(state));
+  cloudSave('state',state);
+  clearDirty();
+  render();
+  await appAlert('All data has been wiped. You\'re starting fresh.');
+}
 if(document.readyState==='complete'){ init(); } else { window.addEventListener('load',init); }
 if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 (function(){

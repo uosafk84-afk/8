@@ -226,7 +226,7 @@ input:focus,select:focus{box-shadow:0 0 0 2px var(--blue);background:rgba(255,25
 </div>
 <div id="saveToast" class="saveToast">✓ Saved</div>
 <div class="app">
-<header class="glass"><div><div class="title"><img src="icon-192.png" alt=""> STAR SHOP</div><div class="date">Working day: <input type="date" class="date" id="workDateInput" onchange="changeWorkDate(this.value)"></div><div id="syncBadge" class="syncBadge offline">📴 Local only</div> <span id="unsavedBadge" class="syncBadge unsaved" style="display:none">● Saving…</span></div><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button type="button" class="saveBtn" onclick="manualSave()">💾 Save</button><button type="button" class="primary" onclick="closeDay()">SAVE & CLOSE DAY</button></div></header>
+<header class="glass"><div><div class="title"><img src="icon-192.png" alt=""> STAR SHOP</div><div class="date">Working day: <input type="date" class="date" id="workDateInput" onchange="changeWorkDate(this.value)"></div><div id="syncBadge" class="syncBadge offline">📴 Local only</div> <span id="unsavedBadge" class="syncBadge unsaved" style="display:none">● Saving…</span></div><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button type="button" class="saveBtn" onclick="manualSave()">💾 Save</button><button type="button" class="primary" onclick="closeDay()">SAVE & CLOSE DAY</button><button type="button" class="dangerBtn" onclick="clearToday()">🧹 Clear</button></div></header>
 <nav>
 <button type="button" class="navActive" data-view="daily" onclick="show('daily')"><span class="iconBadge blue">🏠</span>Daily Sale</button>
 <button type="button" data-view="history" onclick="show('history')"><span class="iconBadge orange">🕘</span>History</button>
@@ -537,6 +537,7 @@ async function init(){
   }catch(e){}
   ensureRowCounts();
   render();
+  initBackNav();
   await initFirebaseSync();
   ensureRowCounts();
   render();
@@ -647,10 +648,17 @@ let msg=`${state.openDate}\nTotal Sales: ${money(sums.totalSales)} AFN\nTotal Pr
 if(existing && (Number(existing.summary?.count)>0 || Number(existing.summary?.totalSales)>0)) msg+=`\n\n⚠️ History already has a saved day for ${state.openDate}. Your older data for that date will be kept as a backup entry, not deleted.`;
 let ok=await appConfirm(msg);if(!ok)return;
 addHistoryEntry({date:state.openDate,summary:sums,rows:state.rows,expenses:Number(state.expenses||0),rent:Number(state.rent||0),closedAt:new Date().toISOString()});
+render();
+await manualSave();
+await appAlert('Day saved successfully to History. Your entries are still shown below — tap Clear whenever you\'re ready to start a fresh sheet.');
+}
+async function clearToday(){
+if(!hasData()){await appAlert('There is nothing to clear.');return}
+let ok=await appConfirm('Clear today\'s sheet? This wipes all entries, expenses and the entry rows on screen.\n\nAnything you already SAVE & CLOSE DAY\'d is safe in History — this only clears the working sheet.');
+if(!ok)return;
 advanceDay(today());
 render();
 await manualSave();
-await appAlert('Day saved successfully. A fresh daily sheet is ready. Your saved days are never deleted automatically — History keeps every day, with no limit.');
 }
 function addHistoryEntry(entry){
   let i=state.history.findIndex(d=>d.date===entry.date);
@@ -704,7 +712,40 @@ show('history');window.scrollTo({top:document.body.scrollHeight,behavior:'smooth
 }
 function saveSettings(){settings={soap:val(document.getElementById('setSoap').value),surf:val(document.getElementById('setSurf').value),wasleen:val(document.getElementById('setWasleen').value),sh10:val(document.getElementById('setSh10').value)||5,sh6:val(document.getElementById('setSh6').value)||8,rent:Number(settings.rent||0)};storageSet(SET,JSON.stringify(settings));cloudSave('settings',settings);appAlert('Settings saved. Existing entered rows keep their own A Price.');render()}
 function loadSettings(){document.getElementById('setSoap').value=settings.soap??'';document.getElementById('setSurf').value=settings.surf??'';document.getElementById('setWasleen').value=settings.wasleen??57;document.getElementById('setSh10').value=settings.sh10??5;document.getElementById('setSh6').value=settings.sh6??8}
-function show(id){document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('navActive',b.dataset.view===id));if(id==='history')renderHistory();if(id==='analytics')renderAnalytics()}
+let currentView='daily',exitGuardActive=false;
+function show(id,fromHistory){
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('navActive',b.dataset.view===id));
+  if(id==='history')renderHistory();
+  if(id==='analytics')renderAnalytics();
+  if(!fromHistory && id!==currentView){
+    history.pushState({view:id},'','#'+id);
+  }
+  currentView=id;
+}
+async function handlePopState(e){
+  const st=e.state;
+  if(st && st.view){
+    show(st.view,true);
+    return;
+  }
+  // Nothing left in our own navigation stack: user is trying to leave from Home.
+  history.pushState({view:'daily'},'','#daily'); // re-plant a guard entry so the app doesn't close yet
+  if(exitGuardActive)return;
+  exitGuardActive=true;
+  const ok=await appConfirm('Exit STAR SHOP?');
+  exitGuardActive=false;
+  if(ok){
+    window.removeEventListener('popstate',handlePopState);
+    history.go(-1);
+    setTimeout(()=>{ try{window.close();}catch(err){} },50);
+  }
+}
+function initBackNav(){
+  history.replaceState({view:'daily'},'','#daily');
+  window.addEventListener('popstate',handlePopState);
+}
 function showProd(tab){
   document.querySelectorAll('.prodSection').forEach(x=>x.classList.toggle('active',x.dataset.tab===tab));
   document.querySelectorAll('.prodTabBtn').forEach(x=>x.classList.toggle('active',x.dataset.tab===tab));
